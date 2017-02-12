@@ -1,0 +1,20 @@
+{
+  "timestamp": 1486907699070,
+  "message": {
+    "mid": "mid.1486907699070:376a7c8370",
+    "seq": 7922,
+    "attachments": [
+      {
+        "url": "https://l.facebook.com/l.php?u=...",
+        "type": "location",
+        "payload": {
+          "coordinates": {
+            "lat": 53.214204826496,
+            "long": 9.5610321523142
+          }
+        },
+        "title": "Jelmer's Location"
+      }
+    ]
+  }
+}
