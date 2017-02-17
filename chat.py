@@ -171,17 +171,37 @@ class Question(object):
 
 
 class WaarBenJe(Question):
-    def text(self):
+    def text(self, state):
         return "Waar ben je?"
 
     def interpret(self, answer, state):
-        match = re.match(r'^(?:Ik ben\s)?(?:bij\s(?:de\s)?)?(.+?)$', answer, flags=re.IGNORECASE)
+        if re.match(r'.*\btrein\b.*', answer):
+            state.on_the_road = True
+            state.memory.add(equal(getter('class'), 'railway'))
+            state.memory.add(equal(getter('type'), 'station'))
+            match = re.match(r'.*\b(?:naar|richting)\s+(.+?)$', answer)
+            if match:
+                state.query.reset([match.group(1)])
+        elif re.match(r'.*\bbus\b.*', answer):
+            state.on_the_road = True
+            # state.memory.add(equal(getter('type'), 'bus_stop')) # not supported now :(
+        else:
+            match = re.match(r'(?:Ik ben\s)?(?:(?:bij|in)\s(?:de\s)?)?(.+?)', answer, flags=re.IGNORECASE)
+            state.query.reset([match.group(1) if match is not None else answer])
+
+
+class WaarGaJeNaarToe(Question):
+    def text(self, state):
+        return "Waar ga je naar toe?"
+
+    def interpret(self, answer, state):
+        match = re.match(r'^(?:Ik ga\s)?(?:(?:naar|richting)\s(?:de\s)?)?(.+?)$', answer, flags=re.IGNORECASE)
         state.query.reset([match.group(1) if match is not None else answer])
 
 
 class IkWeetNietWaarJeBent(WaarBenJe):
-    def text(self):
-        return "Ik weet niet waar je bent.. kan je het nog een keer uitleggen?"
+    def text(self, state):
+        return "Ik weet niet waar je {}.. kan je het nog een keer uitleggen?".format("naar toe gaat" if state.on_the_road else "bent")
 
 
 
@@ -189,14 +209,17 @@ class BenJeHier(Question):
     def __init__(self, location):
         self.location = location
 
-    def text(self):
-        return "Ben je op {}?".format(self.location['display_name'])
+    def text(self, state):
+        if state.on_the_road:
+            return "Ga je naar {}?".format(self.location['display_name'])
+        else:
+            return "Ben je op {}?".format(self.location['display_name'])
 
     def interpret(self, answer, state):
         if is_positive(answer):
             state.location = self.location
         else:
-            if not re.match(r'^nee|nope$'): # is there more to this answer?
+            if not re.match(r'^nee|nope$', answer): # is there more to this answer?
                 match = re.match(r'(?:(?:nee|nope),?\s+)?(?:(?:die\s)?in\s+)?(.+?)$', answer, flags=re.IGNORECASE)
                 if match is not None:
                     state.query.enqueue(match.group(1))
@@ -209,8 +232,8 @@ class BedoelJeDieIn(Question):
         self.options = options
         self.best = options[0]
         
-    def text(self):
-        return "In {}?".format(self.feature(self.best))
+    def text(self, state):
+        return "In {} ({!r})?".format(self.feature(self.best), self.feature)
 
     def interpret(self, answer, state):
         if is_positive(answer):
@@ -219,29 +242,52 @@ class BedoelJeDieIn(Question):
             state.memory.add(not_equal(self.feature, self.feature(self.best)))
 
 
+class WelkeBedoelJe(Question):
+    def __init__(self, options):
+        self.options = options
+
+    def text(self, state):
+        return "Welke bedoel je?\n{}".format("\n".join(["{}. {}".format(n + 1, option['display_name']) for n, option in enumerate(self.options)]))
+
+    def interpret(self, answer, state):
+        if answer.isdigit() and int(answer) > 0 and int(answer) <= len(self.options):
+            state.location = self.options[int(answer)]
+        else:
+            for option in self.options:
+                state.memory.add(not_equal(getter('place_id'), option['place_id']))
+
+
 class State(object):
     def __init__(self):
         self.query = Queue()
         self.memory = conjunction()
         self.options = None
         self.location = None
+        self.on_the_road = None
 
     def next(self):
         if len(self.query) == 0:
-            return WaarBenJe()
+            if self.on_the_road:
+                return WaarGaJeNaarToe()
+            else:
+                return WaarBenJe()
         
         self.__update_options()
 
         if len(self.options) == 0:
             return IkWeetNietWaarJeBent()
         elif len(self.options) == 1:
+            print(self.options[0]['type'])
             return BenJeHier(self.options[0])
         else:
             feature = self.__find_distinctive_feature(self.options)
-            return BedoelJeDieIn(feature, self.options)
+            if feature is not None:
+                return BedoelJeDieIn(feature, self.options)
+            else:
+                return WelkeBedoelJe(self.options)
 
     def __update_options(self):
-        excluded_place_ids = [cond.value for cond in self.memory if cond.key.field == 'place_id']
+        excluded_place_ids = [cond.value for cond in self.memory if isinstance(cond.key, getter) and cond.key.field == 'place_id']
         options = search(", ".join(self.query), excluded_place_ids)
         self.options = [option for option in options if self.memory.test(option)]
 
@@ -261,17 +307,18 @@ class State(object):
         return None
 
 
-
 def run():
     state = State()
 
     while state.location is None:
         question = state.next()
-        print(question.text())
+        print(question.text(state))
         question.interpret(input('> '), state)
-        print(repr(state.memory))
+        print(repr(state.memory), file=sys.stderr)
 
     print_location(state.location)
+    if state.on_the_road:
+        print("Goede reis!")
 
 
 if __name__ == '__main__':
