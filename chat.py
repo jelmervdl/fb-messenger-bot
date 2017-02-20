@@ -4,6 +4,14 @@ import re
 from base64 import b64encode
 
 
+VERBOSE = False
+
+
+def print_debug(*args):
+    if VERBOSE:
+        print(*args, file=sys.stderr)
+
+
 def ask_initial():
     print("Waar ben je?")
     return input("> ")
@@ -20,8 +28,9 @@ def search(query, excluded_place_ids=[]):
         'exclude_place_ids': ",".join(excluded_place_ids),
         'email': 'jelmer.van.der.linde@rug.nl'
     }
+    print_debug(repr(params))
     response = requests.get('http://nominatim.openstreetmap.org/search', params=params)
-    print(response.json(), file=sys.stderr)
+    print_debug(response.json())
     return response.json()
 
 
@@ -107,8 +116,8 @@ def print_image(data, filename='unspecified.png'):
         (b64encode(filename.encode('UTF-8')), len(data), b64encode(data)))
 
 def print_map(location):
-    url = 'http://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom=18&size=865x512&maptype=mapnik&markers={lat},{lon},lightblue1'.format(**location)
-    print(url)
+    url = 'http://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom=18&size=600x400&maptype=mapnik&markers={lat},{lon},lightblue1'.format(**location)
+    print_debug(url)
     response = requests.get(url)
     print_image(response.content)
 
@@ -186,7 +195,7 @@ class WaarBenJe(Question):
             state.on_the_road = True
             # state.memory.add(equal(getter('type'), 'bus_stop')) # not supported now :(
         else:
-            match = re.match(r'(?:Ik ben\s)?(?:(?:bij|in)\s(?:de\s)?)?(.+?)', answer, flags=re.IGNORECASE)
+            match = re.match(r'(?:Ik ben\s)?(?:(?:bij|in)\s(?:de\s)?)?(.+?)$', answer, flags=re.IGNORECASE)
             state.query.reset([match.group(1) if match is not None else answer])
 
 
@@ -219,10 +228,6 @@ class BenJeHier(Question):
         if is_positive(answer):
             state.location = self.location
         else:
-            if not re.match(r'^nee|nope$', answer): # is there more to this answer?
-                match = re.match(r'(?:(?:nee|nope),?\s+)?(?:(?:die\s)?in\s+)?(.+?)$', answer, flags=re.IGNORECASE)
-                if match is not None:
-                    state.query.enqueue(match.group(1))
             state.memory.add(not_equal(getter('place_id'), self.location['place_id']))
 
 
@@ -233,12 +238,16 @@ class BedoelJeDieIn(Question):
         self.best = options[0]
         
     def text(self, state):
-        return "In {} ({!r})?".format(self.feature(self.best), self.feature)
+        return "In {}?".format(self.feature(self.best))
 
     def interpret(self, answer, state):
         if is_positive(answer):
             state.memory.add(equal(self.feature, self.feature(self.best)))
         else:
+            match = re.match(r'(?:(?:nee|nope),?\s+)?(?:(?:die\s)?in\s+)?(.+?)$', answer.strip(), flags=re.IGNORECASE)
+            if match is not None:
+                state.query.enqueue(match.group(1))
+            state.memory.add(not_equal(getter('place_id'), self.best['place_id']))
             state.memory.add(not_equal(self.feature, self.feature(self.best)))
 
 
@@ -277,7 +286,6 @@ class State(object):
         if len(self.options) == 0:
             return IkWeetNietWaarJeBent()
         elif len(self.options) == 1:
-            print(self.options[0]['type'])
             return BenJeHier(self.options[0])
         else:
             feature = self.__find_distinctive_feature(self.options)
@@ -310,11 +318,14 @@ class State(object):
 def run():
     state = State()
 
+    if '--verbose' in sys.argv:
+        VERBOSE = True
+
     while state.location is None:
         question = state.next()
         print(question.text(state))
         question.interpret(input('> '), state)
-        print(repr(state.memory), file=sys.stderr)
+        # print(repr(state.memory), file=sys.stderr)
 
     print_location(state.location)
     if state.on_the_road:
