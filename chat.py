@@ -111,12 +111,16 @@ def link_osm(location):
     return "https://www.openstreetmap.org/node/{}".format(location['osm_id'])
 
 
+def link_map(location, size=(600,400)):
+    return "http://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom=18&size={size[0]}x{size[1]}&maptype=mapnik&markers={lat},{lon},lightblue1".format(**location, size=size)
+
+
 def print_image(data, filename='unspecified.png'):
     sys.stdout.buffer.write(b"\033]1337;File=name=%s;size=%d;inline=1:%s\a\n" %
         (b64encode(filename.encode('UTF-8')), len(data), b64encode(data)))
 
 def print_map(location):
-    url = 'http://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom=18&size=600x400&maptype=mapnik&markers={lat},{lon},lightblue1'.format(**location)
+    url = link_map(location)
     print_debug(url)
     response = requests.get(url)
     print_image(response.content)
